@@ -4,279 +4,193 @@
 #include <cstddef>
 #include <optional>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#define STATS 1
+#include <raylib.h>
 
 namespace pgce {
 
-#if STATS
-#define STAT(X) X
-struct Stats {
-	struct Data {
-		int e { 0 };
-		int d { 0 };
-		int s { 0 };
-	};
-	static Data& Get()
-	{
-		static Data data;
-		return data;
-	}
-};
-#else
-#define STAT(X)
-#endif
-
-template <typename Base, typename Tuple, std::size_t I = 0>
-struct tuple_ref_index;
-
-template <typename Base, typename Head, typename... Tail, std::size_t I>
-struct tuple_ref_index<Base, std::tuple<Head, Tail...>, I>
-	: std::conditional<std::is_base_of<Base, Head>::value, std::integral_constant<std::size_t, I>, tuple_ref_index<Base, std::tuple<Tail...>, I + 1>>::type {
+template <typename E, E, typename T>
+struct CmpMeta {
+	static inline consteval bool has() { return false; }
 };
 
-template <typename Base, typename Tuple>
-auto tuple_ref_by_inheritance(Tuple&& tuple)
-	-> decltype(std::get<tuple_ref_index<Base, typename std::decay<Tuple>::type>::value>(std::forward<Tuple>(tuple)))
-{
-	return std::get<tuple_ref_index<Base, typename std::decay<Tuple>::type>::value>(std::forward<Tuple>(tuple));
-}
-
-template <typename T, typename Tuple>
-struct has_type;
-template <typename T, typename... Us>
-struct has_type<T, std::tuple<Us...>>
-	: std::disjunction<std::is_same<T, Us>...> { };
-
-template <typename T, typename Tuple>
-struct has_base;
-template <typename T, typename... Us>
-struct has_base<T, std::tuple<Us...>>
-	: std::disjunction<std::is_base_of<T, Us>...> { };
-
-template <typename... ARGS>
-struct Visit {
-private:
-	template <typename E, typename F>
-	static int VisitE(const E& e, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().e++);
-			f(std::get<std::decay_t<ARGS>>(e)...);
-		} else if constexpr ((has_base<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().e++);
-			f(tuple_ref_by_inheritance<std::decay_t<ARGS>>(e)...);
-		}
-		return 0;
+#define DEF(CLASS, CMP, M)                                           \
+	template <>                                                      \
+	struct pgce::CmpMeta<decltype(CMP), CMP, CLASS> {                \
+		using Ret = decltype(CLASS::M);                              \
+		static inline Ret& get(CLASS& e) { return e.M; }             \
+		static inline const Ret& get(const CLASS& e) { return e.M; } \
+		static inline consteval bool has() { return true; }          \
 	}
-	template <typename E, typename F>
-	static int VisitE(E& e, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().e++);
-			f(std::get<std::decay_t<ARGS>>(e)...);
-		} else if constexpr ((has_base<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().e++);
-			f(tuple_ref_by_inheritance<std::decay_t<ARGS>>(e)...);
-		}
-		return 0;
-	}
-	// --------------------------------------------------------------
-	template <typename E, typename F>
-	static int V(const std::vector<E>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es)
-				VisitE(e, f);
-		} else if constexpr ((has_base<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es)
-				VisitE(e, f);
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	template <typename E, typename F>
-	static int V(std::vector<E>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es)
-				VisitE(e, f);
-		} else if constexpr ((has_base<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es)
-				VisitE(e, f);
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	// --------------------------------------------------------------
-	template <typename E, typename F>
-	static int V(const std::optional<E>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			if (es)
-				VisitE(*es, f);
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	template <typename E, typename F>
-	static int V(std::optional<E>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			if (es)
-				VisitE(*es, f);
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	// --------------------------------------------------------------
-	template <typename E, typename F, size_t N>
-	static int V(const std::array<std::optional<E>, N>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es) {
-				if (e)
-					VisitE(*e, f);
-			}
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	template <typename E, typename F, size_t N>
-	static int V(std::array<std::optional<E>, N>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es) {
-				if (e)
-					VisitE(*e, f);
-			}
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	// --------------------------------------------------------------
-	template <typename E, typename F, size_t N>
-	static int V(const std::array<E, N>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es)
-				VisitE(e, f);
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	template <typename E, typename F, size_t N>
-	static int V(std::array<E, N>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			for (auto& e : es)
-				VisitE(e, f);
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-
-public:
-	template <typename F, typename... ES>
-	static void V(std::tuple<ES...>& db, F&& f)
-		requires std::is_invocable_v<F, ARGS&...>
-	{
-		auto _ = { (V(std::get<ES>(db), f))... };
-		(void)_;
-	}
-	template <typename F, typename... ES>
-	static void V(const std::tuple<ES...>& db, F&& f)
-		requires std::is_invocable_v<F, ARGS&...>
-	{
-		auto _ = { (V(std::get<ES>(db), f))... };
-		(void)_;
-	}
-};
-
-template <typename... ARGS>
-struct Remove {
-private:
-	template <typename E, typename F>
-	static int R(std::vector<E>& es, F&& f)
-	{
-		if constexpr ((has_type<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			es.erase(
-				std::remove_if(es.begin(), es.end(), [&](E& e) -> bool {
-					return f(std::get<std::decay_t<ARGS>>(e)...);
-				}),
-				es.end());
-		} else if constexpr ((has_base<std::decay_t<ARGS>, E>::value && ...)) {
-			STAT(Stats::Get().d++);
-			es.erase(
-				std::remove_if(es.begin(), es.end(), [&](E& e) -> bool {
-					return f(tuple_ref_by_inheritance<std::decay_t<ARGS>>(e)...);
-				}),
-				es.end());
-		} else {
-			STAT(Stats::Get().s++);
-		}
-		return 0;
-	}
-	template <typename T, typename F>
-	static int R(T& es, F&& f) { return 0; }
-
-public:
-	template <typename F, typename... ES>
-	static void R(std::tuple<ES...>& db, F&& f)
-		requires std::is_invocable_v<F, ARGS&...>
-	{
-		auto _ = { (R(std::get<ES>(db), f))... };
-		(void)_;
-	}
-};
 
 template <typename E>
-struct Make {
-private:
-	template <typename T>
-	static int Set(E& e, T&& v)
-	{
-		std::get<T>(e) = v;
-		return 0;
-	}
+struct M {
+	template <E... cmps>
+	struct H {
+		template <typename T>
+		consteval static bool has()
+		{
+			return (CmpMeta<decltype(cmps), cmps, T>::has() && ...);
+		}
+		// ===============================================================
+		// entity
+		template <typename T, typename F>
+		static bool visit(T& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				fn(CmpMeta<decltype(cmps), cmps, T>::get(e)...);
+			return true;
+		}
+		template <typename T, typename F>
+		static bool visit(const T& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				fn(CmpMeta<decltype(cmps), cmps, T>::get(e)...);
+			return true;
+		}
+		// optional
+		template <typename T, typename F>
+		static bool visit(std::optional<T>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				if (e)
+					visit(*e, fn);
+			return true;
+		}
+		template <typename T, typename F>
+		static bool visit(const std::optional<T>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				if (e)
+					visit(*e, fn);
+			return true;
+		}
+		// vector
+		template <typename T, typename F>
+		static bool visit(std::vector<T>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				for (auto& i : e)
+					visit(i, fn);
+			return true;
+		}
+		template <typename T, typename F>
+		static bool visit(const std::vector<T>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				for (const auto& i : e)
+					visit(i, fn);
+			return true;
+		}
+		// array
+		template <typename T, size_t N, typename F>
+		static bool visit(std::array<T, N>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				for (auto& i : e)
+					visit(i, fn);
+			return true;
+		}
+		template <typename T, size_t N, typename F>
+		static bool visit(const std::array<T, N>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				for (const auto& i : e)
+					visit(i, fn);
+			return true;
+		}
+		// tuple
+		template <typename F, typename... ES>
+		static bool visit(std::tuple<ES...>& db, F&& f)
+		{
+			return (visit(std::get<ES>(db), f), ...);
+		}
+		template <typename F, typename... ES>
+		static bool visit(const std::tuple<ES...>& db, F&& f)
+		{
+			return (visit(std::get<ES>(db), f), ...);
+		}
+		// ===============================================================
+		// entity
+		template <typename T, typename F>
+		static bool remove(T& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				return fn(CmpMeta<decltype(cmps), cmps, T>::get(e)...);
+			return false;
+		}
+		// optional
+		template <typename T, typename F>
+		static bool remove(std::optional<T>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				if (e && remove(*e, fn))
+					e = std::nullopt;
+			return false;
+		}
+		// vector
+		template <typename T, typename F>
+		static bool remove(std::vector<T>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				e.erase(std::remove_if(e.begin(), e.end(), [&](T& i) { return remove(i, fn); }), e.end());
+			return false;
+		}
+		// array
+		template <typename T, size_t N, typename F>
+		static bool remove(std::array<T, N>& e, F&& fn)
+		{
+			if constexpr (has<T>())
+				for (auto& i : e)
+					remove(i, fn);
+			return false;
+		}
+		// tuple
+		template <typename F, typename... ES>
+		static bool remove(std::tuple<ES...>& db, F&& f)
+		{
+			return (remove(std::get<ES>(db), f), ...);
+		}
+	};
+};
 
-public:
-	template <typename T>
-	static E& M0(T& db, E&& e)
+template <typename T, typename C>
+struct Maker {
+	static inline bool add(C& c, T&& e)
 	{
-		auto& es = std::get<std::vector<E>>(db);
-		return es.emplace_back(e);
+		return true;
 	}
-	template <typename T, typename... ARGS>
-	static E& M1(T& db, ARGS&&... args)
+};
+
+template <typename T>
+struct Maker<T, std::vector<T>> {
+	static inline bool add(std::vector<T>& c, T&& e)
 	{
-		auto& es = std::get<std::vector<E>>(db);
-		E& e = es.emplace_back();
-		auto _ = { (Set<ARGS>(e, std::move(args)))... };
-		(void)_;
-		return e;
+		c.emplace_back() = std::move(e);
+		return false;
+	}
+};
+
+template <typename T>
+struct Maker<T, std::optional<T>> {
+	static inline bool add(std::optional<T>& c, T&& e)
+	{
+		c.emplace() = std::move(e);
+		return false;
+	}
+};
+
+struct A {
+	template <typename T, typename DB, size_t... Is>
+	static bool make(DB& db, T&& e, std::index_sequence<Is...> ints = {})
+	{
+		if constexpr (std::tuple_size_v<DB> != sizeof...(Is)) {
+			return make(db, std::move(e), std::make_index_sequence<std::tuple_size_v<DB>> {});
+		} else {
+			return (Maker<T, std::tuple_element_t<Is, DB>>::add(std::get<Is>(db), std::move(e)) && ...);
+		}
 	}
 };
 
